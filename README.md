@@ -1,11 +1,12 @@
-# STM32F103 Bare-Metal Bring-Up
+# STM32F103 USART Bootloader Bring-Up
 
-Minimal bare-metal firmware for an STM32F103C8/CB-class board. The current program configures PC13 as a 2 MHz push-pull output and blinks the onboard LED using direct register access. No HAL or vendor library is used.
+Minimal bare-metal firmware for an STM32F103C8/CB-class board. The current program configures USART1 for serial communication and keeps the PC13 LED as a hardware heartbeat. No HAL or vendor library is used.
 
 ## Hardware
 
-- STM32F103 board, such as a Blue Pill
+- STM32F103 board, such as a Black Pill
 - ST-Link V2 or compatible SWD debugger/programmer
+- CP2102 USB-to-UART adapter with 3.3V logic
 - USB data cable
 
 The firmware uses the default 8 MHz HSI clock after reset. The blink timing is a software busy-wait and is not a precise millisecond timer.
@@ -15,12 +16,38 @@ The firmware uses the default 8 MHz HSI clock after reset. The blink timing is a
 | ST-Link | STM32F103 | Purpose |
 | --- | --- | --- |
 | 3.3V | 3.3V / VDD | Target power or voltage reference |
-| GND | GND / VSS | Common ground |
+| GND | GND | Common ground |
 | SWDIO | PA13/DIO | SWD data |
 | SWCLK | PA14/CLK | SWD clock |
-| NRST | NRST | Target reset; recommended |
 
-Do not connect the ST-Link 5V output to the STM32 3.3V supply. Confirm that the board and ST-Link share ground.
+Confirm that the board and ST-Link share ground.
+
+## CP2102 USART1 Connections
+
+| STM32F103 | CP2102 | Purpose |
+| --- | --- | --- |
+| PA9 | RXD | USART1 TX |
+| PA10 | TXD | USART1 RX |
+| GND | GND | Common ground |
+
+The TX and RX connections are crossed. Leave CP2102 VCC disconnected when the board is powered separately. Use 3.3 V logic only.
+
+## USART1 Configuration
+
+The firmware uses USART1 with:
+
+- Baud rate: `115200`
+- Data bits: `8`
+- Parity: none
+- Stop bits: `1`
+- Flow control: none
+- Clock: default 8 MHz HSI
+
+The USART implementation is separated into:
+
+- `src/uart.h`: public function declarations
+- `src/uart.c`: USART1 register definitions and implementation
+- `src/main.c`: LED heartbeat, startup message, and echo loop
 
 ## Build Tools
 
@@ -68,18 +95,20 @@ A successful flash contains messages similar to:
 ** Resetting Target **
 ```
 
-## Run the Program
+## Run the LED and UART Program
 
 After flashing, the MCU resets and starts the firmware automatically. The program:
 
 1. Runs `Reset_Handler` from the vector table.
 2. Initializes `.data` and `.bss`.
 3. Calls `main()`.
-4. Enables the GPIOC clock.
+4. Enables GPIOC, GPIOA, and USART1.
 5. Configures PC13 as a push-pull output.
-6. Sets and resets PC13 repeatedly.
+6. Configures PA9 and PA10 for USART1.
+7. Prints `Bootloader Ready`.
+8. Echoes each received character and blinks PC13.
 
-On common Blue Pill boards, the PC13 LED is active-low: PC13 low turns the LED on and PC13 high turns it off. If there is no visible blink, the board may use a different LED connection.
+On common Black Pill boards, the PC13 LED is active-low: PC13 low turns the LED on and PC13 high turns it off. If there is no visible blink, the board may use a different LED connection.
 
 The blink speed can be changed in `src/main.c` by changing:
 
@@ -88,6 +117,36 @@ The blink speed can be changed in `src/main.c` by changing:
 ```
 
 A larger value makes the blink slower; a smaller value makes it faster.
+
+## Test USART1
+
+After flashing, disconnect the ST-Link and power the board with its USB cable or another safe single power source. Keep CP2102 connected to PA9, PA10, and GND, then find the serial device:
+
+```bash
+ls /dev/ttyUSB* /dev/ttyACM*
+```
+
+Open it with:
+
+```bash
+picocom -b 115200 /dev/ttyUSB0
+```
+
+Press reset once. The terminal should show:
+
+```text
+Bootloader Ready
+```
+
+Type any character without pressing Enter. The character should be echoed immediately and the PC13 LED should blink. Exit with `Ctrl+A`, then `Ctrl+X`.
+
+On WSL, the CP2102 may need to be attached through `usbipd`. If `/dev/ttyUSB0` is missing, reconnect or reattach the CP2102 and check the device path again. If permission is denied, add the user to `dialout` and restart WSL:
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+Do not use `0x271` for the baud register unless the system clock has explicitly been configured to 72 MHz. With the default 8 MHz HSI clock, the USART baud register value is `0x45`.
 
 ## Debug with GDB
 

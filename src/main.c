@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "uart.h"
 
 #define DELAY 500000
 /* ---- Peripheral base addresses ---- */
@@ -28,7 +29,12 @@ int main(void)
     GPIOC_CRH &= ~(0xFUL << 20);   /* clear PC13 config bits */
     GPIOC_CRH |=  (0x2UL << 20);   /* set mode=output 2MHz, cnf=push-pull */
 
+    uart1_init();
+    uart1_puts("Bootloader Ready\r\n");
+
     while (1) {
+        char received = uart1_getc();
+        uart1_putc(received);
         GPIOC_BSRR = (1UL << 13);  /* set PC13 */
         delay(DELAY);
         GPIOC_BSRR = (1UL << (13 + 16));  /* reset PC13 */

@@ -13,8 +13,10 @@ CPU_FLAGS   = -mcpu=cortex-m3 -mthumb
 CFLAGS      = $(CPU_FLAGS) -Wall -O0 -g3 -ffreestanding -nostdlib -fno-builtin
 LDFLAGS     = $(CPU_FLAGS) -T stm32f103.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(BUILD_DIR)/$(TARGET).map
 
-SRCS        = src/startup_stm32f103.s src/main.c
-OBJS        = $(BUILD_DIR)/startup_stm32f103.o $(BUILD_DIR)/main.o
+SRCS        = src/startup_stm32f103.s src/main.c src/uart.c
+OBJS        = $(BUILD_DIR)/startup_stm32f103.o \
+			  $(BUILD_DIR)/main.o \
+			  $(BUILD_DIR)/uart.o
 
 .PHONY: all clean flash debug openocd size
 
@@ -26,7 +28,10 @@ $(BUILD_DIR):
 $(BUILD_DIR)/startup_stm32f103.o: src/startup_stm32f103.s | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/main.o: src/main.c | $(BUILD_DIR)
+$(BUILD_DIR)/main.o: src/main.c src/uart.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/uart.o: src/uart.c src/uart.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/$(TARGET).elf: $(OBJS)

@@ -1,12 +1,12 @@
 /*
  * Linker script for STM32F103C8T6
- * Flash: 64KB starting at 0x08000000
+ * Application Flash: 56KB starting at 0x08002000
  * RAM:   20KB starting at 0x20000000
  */
 
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 8K
+  FLASH (rx)  : ORIGIN = 0x08002000, LENGTH = 56K
   RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 20K
 }
 

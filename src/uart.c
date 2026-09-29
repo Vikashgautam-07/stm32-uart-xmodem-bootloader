@@ -48,12 +48,30 @@ void uart1_putc(char character)
 
 char uart1_getc(void)
 {
-    while ((USART1_SR & USART_SR_RXNE) == 0)
+    char character;
+    while (!uart1_try_getc(&character))
     {
     }
 
-    return (char)(USART1_DR & 0xFFU);
+    return character;
 }
+
+int uart1_try_getc(char *character)
+{
+    if ((USART1_SR & USART_SR_RXNE) == 0)
+    {
+        return 0;
+    }
+
+    *character = (char)(USART1_DR & 0xFFU);
+    return 1;
+}
+
+void uart1_disable(void)
+{
+    USART1_CR1 = 0;
+}
+
 void uart1_puts(const char *text)
 {
     while (*text != '\0')

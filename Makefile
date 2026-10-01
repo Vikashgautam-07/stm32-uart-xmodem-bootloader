@@ -1,6 +1,7 @@
 # Makefile for STM32F103C8T6 bare-metal bring-up project
 
 TARGET      = firmware
+APP_TARGET  = application
 BUILD_DIR   = build
 
 PREFIX      = arm-none-eabi
@@ -13,14 +14,18 @@ CPU_FLAGS   = -mcpu=cortex-m3 -mthumb
 CFLAGS      = $(CPU_FLAGS) -Wall -O0 -g3 -ffreestanding -nostdlib -fno-builtin
 LDFLAGS     = $(CPU_FLAGS) -T stm32f103.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(BUILD_DIR)/$(TARGET).map
 
-SRCS        = src/startup_stm32f103.s src/main.c src/uart.c
+SRCS        = src/startup_stm32f103.s src/main.c src/uart.c src/xmodem.c
 OBJS        = $(BUILD_DIR)/startup_stm32f103.o \
 			  $(BUILD_DIR)/main.o \
-			  $(BUILD_DIR)/uart.o
+			  $(BUILD_DIR)/uart.o \
+			  $(BUILD_DIR)/xmodem.o
 
 .PHONY: all clean flash debug openocd size
 
-all: $(BUILD_DIR)/$(TARGET).elf $(BUILD_DIR)/$(TARGET).bin size
+all: $(BUILD_DIR)/$(TARGET).elf $(BUILD_DIR)/$(TARGET).bin \
+	$(BUILD_DIR)/$(APP_TARGET).elf $(BUILD_DIR)/$(APP_TARGET).bin size
+
+application: $(BUILD_DIR)/$(APP_TARGET).elf $(BUILD_DIR)/$(APP_TARGET).bin
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -34,10 +39,24 @@ $(BUILD_DIR)/main.o: src/main.c src/uart.h | $(BUILD_DIR)
 $(BUILD_DIR)/uart.o: src/uart.c src/uart.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/xmodem.o: src/xmodem.c src/xmodem.h src/uart.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/application_main.o: src/application_main.c src/uart.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/$(TARGET).elf: $(OBJS)
 	$(CC) $(LDFLAGS) $(OBJS) -o $@
 
 $(BUILD_DIR)/$(TARGET).bin: $(BUILD_DIR)/$(TARGET).elf
+	$(OBJCOPY) -O binary $< $@
+
+$(BUILD_DIR)/$(APP_TARGET).elf: $(BUILD_DIR)/startup_stm32f103.o \
+	$(BUILD_DIR)/application_main.o $(BUILD_DIR)/uart.o
+	$(CC) $(CPU_FLAGS) -T application.ld -nostdlib -Wl,--gc-sections \
+		-Wl,-Map=$(BUILD_DIR)/$(APP_TARGET).map $^ -o $@
+
+$(BUILD_DIR)/$(APP_TARGET).bin: $(BUILD_DIR)/$(APP_TARGET).elf
 	$(OBJCOPY) -O binary $< $@
 
 size: $(BUILD_DIR)/$(TARGET).elf

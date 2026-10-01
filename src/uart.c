@@ -14,6 +14,9 @@
 #define USART1_CR1     (*(volatile uint32_t *)(USART1_BASE + 0x0c))
 #define USART1_CR2     (*(volatile uint32_t *)(USART1_BASE + 0x10))
 #define USART1_CR3     (*(volatile uint32_t *)(USART1_BASE + 0x14))
+#define SYSTICK_CTRL   (*(volatile uint32_t *)0xE000E010UL)
+#define SYSTICK_LOAD   (*(volatile uint32_t *)0xE000E014UL)
+#define SYSTICK_VALUE  (*(volatile uint32_t *)0xE000E018UL)
 
 
 #define RCC_IOPAEN      (1UL << 2)
@@ -65,6 +68,39 @@ int uart1_try_getc(char *character)
 
     *character = (char)(USART1_DR & 0xFFU);
     return 1;
+}
+
+int uart1_getc_timeout(char *character, uint32_t timeout_ms)
+{
+    uint32_t ticks;
+
+    if (timeout_ms == 0)
+    {
+        return uart1_try_getc(character);
+    }
+
+    if (timeout_ms > 2000UL)
+    {
+        timeout_ms = 2000UL;
+    }
+    ticks = timeout_ms * 8000UL;
+
+    SYSTICK_CTRL = 0;
+    SYSTICK_LOAD = ticks - 1UL;
+    SYSTICK_VALUE = 0;
+    SYSTICK_CTRL = 0x5UL;
+
+    while ((SYSTICK_CTRL & (1UL << 16)) == 0)
+    {
+        if (uart1_try_getc(character))
+        {
+            SYSTICK_CTRL = 0;
+            return 1;
+        }
+    }
+
+    SYSTICK_CTRL = 0;
+    return uart1_try_getc(character);
 }
 
 void uart1_disable(void)

@@ -72,34 +72,34 @@ int uart1_try_getc(char *character)
 
 int uart1_getc_timeout(char *character, uint32_t timeout_ms)
 {
-    uint32_t ticks;
-
     if (timeout_ms == 0)
     {
         return uart1_try_getc(character);
     }
 
-    if (timeout_ms > 2000UL)
+    while (timeout_ms > 0)
     {
-        timeout_ms = 2000UL;
-    }
-    ticks = timeout_ms * 8000UL;
+        uint32_t interval_ms = timeout_ms > 2000UL ? 2000UL : timeout_ms;
+        uint32_t ticks = interval_ms * 8000UL;
 
-    SYSTICK_CTRL = 0;
-    SYSTICK_LOAD = ticks - 1UL;
-    SYSTICK_VALUE = 0;
-    SYSTICK_CTRL = 0x5UL;
+        SYSTICK_CTRL = 0;
+        SYSTICK_LOAD = ticks - 1UL;
+        SYSTICK_VALUE = 0;
+        SYSTICK_CTRL = 0x5UL;
 
-    while ((SYSTICK_CTRL & (1UL << 16)) == 0)
-    {
-        if (uart1_try_getc(character))
+        while ((SYSTICK_CTRL & (1UL << 16)) == 0)
         {
-            SYSTICK_CTRL = 0;
-            return 1;
+            if (uart1_try_getc(character))
+            {
+                SYSTICK_CTRL = 0;
+                return 1;
+            }
         }
+
+        SYSTICK_CTRL = 0;
+        timeout_ms -= interval_ms;
     }
 
-    SYSTICK_CTRL = 0;
     return uart1_try_getc(character);
 }
 
@@ -115,4 +115,20 @@ void uart1_puts(const char *text)
         uart1_putc(*text);
         text++;
     }
+}
+
+void uart1_puthex32(uint32_t value)
+{
+    static const char hex_digits[] = "0123456789ABCDEF";
+    char buffer[9];
+
+    for (int index = 7; index >= 0; index--)
+    {
+        buffer[index] = hex_digits[value & 0xFU];
+        value >>= 4U;
+    }
+    buffer[8] = '\0';
+
+    uart1_puts("0x");
+    uart1_puts(buffer);
 }

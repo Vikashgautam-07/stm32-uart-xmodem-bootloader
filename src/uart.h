@@ -9,6 +9,7 @@ char uart1_getc(void);
 int uart1_try_getc(char *character);
 int uart1_getc_timeout(char *character, uint32_t timeout_ms);
 void uart1_puts(const char* text);
+void uart1_puthex32(uint32_t value);
 void uart1_disable(void);
 
 #endif 

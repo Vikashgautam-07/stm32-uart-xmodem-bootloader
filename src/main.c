@@ -14,6 +14,9 @@
 #define SYSTICK_COUNTFLAG (1UL << 16)
 #define UPDATE_COMMAND    'U'
 #define HSI_CLOCK_HZ      8000000UL
+#define UPDATE_WINDOW_SECONDS 5UL
+
+static uint32_t g_image_checksum = 0U;
 
 /* ---- Peripheral base addresses ---- */
 #define RCC_BASE        0x40021000UL
@@ -173,6 +176,27 @@ static int flash_program_halfword(uint32_t address, uint16_t value)
     return *(const volatile uint16_t *)address == value ? 0 : -4;
 }
 
+static void update_image_checksum(const uint8_t *data, uint32_t length)
+{
+    for (uint32_t index = 0; index < length; index++)
+    {
+        g_image_checksum = (g_image_checksum + (uint32_t)data[index]) & 0xFFFFFFFFUL;
+    }
+}
+
+static uint32_t read_image_checksum(uint32_t image_size)
+{
+    const volatile uint8_t *app_data = (const volatile uint8_t *)APP_ADDRESS;
+    uint32_t checksum = 0U;
+
+    for (uint32_t index = 0; index < image_size; index++)
+    {
+        checksum = (checksum + (uint32_t)app_data[index]) & 0xFFFFFFFFUL;
+    }
+
+    return checksum;
+}
+
 static int flash_write_packet(uint32_t offset,
                               const uint8_t *data,
                               uint32_t length)
@@ -216,6 +240,7 @@ static int flash_write_packet(uint32_t offset,
             }
         }
 
+        update_image_checksum(data + written, chunk);
         written += chunk;
     }
 
@@ -224,7 +249,9 @@ static int flash_write_packet(uint32_t offset,
 
 static int wait_for_update_command(void)
 {
-    for (uint32_t elapsed_seconds = 0; elapsed_seconds < 5; elapsed_seconds++)
+    for (uint32_t elapsed_seconds = 0;
+         elapsed_seconds < UPDATE_WINDOW_SECONDS;
+         elapsed_seconds++)
     {
         SYSTICK_LOAD = HSI_CLOCK_HZ - 1UL;
         SYSTICK_VALUE = 0;
@@ -246,6 +273,25 @@ static int wait_for_update_command(void)
     return 0;
 }
 
+static void dump_invalid_app_state(const char *reason)
+{
+    const volatile uint32_t *vectors =
+        (const volatile uint32_t *)APP_ADDRESS;
+    uint32_t initial_sp = vectors[0];
+    uint32_t reset_handler = vectors[1];
+    uint32_t reset_address = reset_handler & ~1UL;
+
+    uart1_puts("App invalid: ");
+    uart1_puts(reason);
+    uart1_puts("\r\nSP=");
+    uart1_puthex32(initial_sp);
+    uart1_puts(" Reset=");
+    uart1_puthex32(reset_handler);
+    uart1_puts(" ResetAddr=");
+    uart1_puthex32(reset_address);
+    uart1_puts("\r\n");
+}
+
 static int application_is_valid(void)
 {
     const volatile uint32_t *vectors =
@@ -254,9 +300,28 @@ static int application_is_valid(void)
     uint32_t reset_handler = vectors[1];
     uint32_t reset_address = reset_handler & ~1UL;
 
-    return initial_sp >= SRAM_START && initial_sp <= SRAM_END &&
-           (initial_sp & 7UL) == 0 && (reset_handler & 1UL) != 0 &&
-           reset_address >= APP_ADDRESS && reset_address < FLASH_END;
+    if (initial_sp < SRAM_START || initial_sp > SRAM_END)
+    {
+        dump_invalid_app_state("SP out of SRAM range");
+        return 0;
+    }
+    if ((initial_sp & 7UL) != 0)
+    {
+        dump_invalid_app_state("SP not 8-byte aligned");
+        return 0;
+    }
+    if ((reset_handler & 1UL) == 0)
+    {
+        dump_invalid_app_state("LR/Thumb bit not set");
+        return 0;
+    }
+    if (reset_address < APP_ADDRESS || reset_address >= FLASH_END)
+    {
+        dump_invalid_app_state("Reset handler outside app region");
+        return 0;
+    }
+
+    return 1;
 }
 
 static void boot_application(void)
@@ -268,6 +333,7 @@ static void boot_application(void)
 
     __asm volatile("cpsid i" ::: "memory");
     SYSTICK_CTRL = 0;
+    RCC_APB2ENR = 0U;
     uart1_disable();
     SCB_VTOR = APP_ADDRESS;
     __asm volatile("dsb\n isb" ::: "memory");
@@ -296,12 +362,15 @@ int main(void)
     }
 
     uart1_puts("Update mode\r\n");
-    uart1_puts("Send XMODEM checksum transfer\r\n");
+    uart1_puts("Send XMODEM CRC/checksum transfer\r\n");
+    g_image_checksum = 0U;
     uint32_t image_size;
     int transfer_result = xmodem_receive(flash_write_packet,
                                          FLASH_END - APP_ADDRESS,
                                          &image_size);
-    if (transfer_result == 0 && image_size != 0 && application_is_valid())
+    if (transfer_result == 0 && image_size != 0 &&
+        application_is_valid() &&
+        read_image_checksum(image_size) == g_image_checksum)
     {
         uart1_puts("Update verified; starting application\r\n");
         boot_application();

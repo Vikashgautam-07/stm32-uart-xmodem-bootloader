@@ -1,6 +1,11 @@
-# STM32F103 USART Bootloader Bring-Up
+# STM32F103 USART XMODEM Bootloader
 
-Minimal bare-metal firmware for an STM32F103C8/CB-class board. The current program configures USART1 for serial communication and keeps the PC13 LED as a hardware heartbeat. No HAL or vendor library is used.
+Bare-metal firmware for an STM32F103C8/CB-class board. The bootloader accepts
+an application image over USART1 using XMODEM, programs the application Flash
+region, checks the programmed image, and jumps to it. On reset, it waits up to
+5 seconds for `U`/`u` to enter update mode; otherwise, it starts a valid
+application. The included sample application prints a startup message and
+blinks PC13. No HAL or vendor library is used.
 
 ## Hardware
 
@@ -47,7 +52,51 @@ The USART implementation is separated into:
 
 - `src/uart.h`: public function declarations
 - `src/uart.c`: USART1 register definitions and implementation
-- `src/main.c`: LED heartbeat, startup message, and echo loop
+- `src/main.c`: boot policy, Flash programming, image validation, and app jump
+- `src/xmodem.c`: XMODEM receiver
+- `src/application_main.c`: example application
+
+## Transfer an Application
+
+### Build and flash the bootloader
+
+From this directory, build and flash the bootloader with an ST-Link:
+
+```bash
+make clean
+make
+make flash
+```
+
+The application linker script places the example application at `0x08002000`;
+the bootloader occupies the first 8 KiB of Flash.
+
+### Send the application from Minicom
+
+1. Build the sample application:
+
+2. Open the board's USART1 serial port at `115200` baud, `8-N-1`. Disable both
+   hardware and software flow control.
+3. Reset the board. During the 5-second boot window, send uppercase or
+   lowercase `U` to enter update mode. If there is no valid app installed, the
+   bootloader enters update mode automatically.
+4. When the bootloader prints `Send XMODEM CRC/checksum transfer` and starts
+   displaying `C`, start Minicom's file-send operation (`Ctrl-A`, then `S`),
+   choose **Xmodem**, and select `build/application.bin`.
+5. Wait for Minicom to report transfer completion, then return to the serial
+   console. The bootloader should print
+   `Update verified; starting application`, followed by
+   `Application started at 0x08002000`.
+
+The receiver supports 128-byte XMODEM (`SOH`) and 1024-byte XMODEM-1K (`STX`)
+blocks, with CRC or checksum. Do not select YMODEM. `C` is the receiver's
+request for CRC-mode XMODEM; it repeats while waiting for the first packet.
+It should stop once a valid packet is received. A reported byte count can
+exceed the binary's actual size because XMODEM pads the final fixed-size block.
+
+The update writes directly into the active application region. Do not remove
+power or reset the board during transfer; an interrupted update may require
+reflashing a valid application.
 
 ## Build Tools
 
@@ -74,15 +123,20 @@ Generated files:
 - `build/firmware.elf`: ELF image used by OpenOCD and GDB
 - `build/firmware.bin`: raw binary image
 - `build/firmware.map`: linker map
+- `build/application.elf`: sample application ELF linked at `0x08002000`
+- `build/application.bin`: sample application binary to transfer over XMODEM
 
 ## Flash the Board
 
 Connect the ST-Link and board, then run:
 
 ```bash
-make clean
-make
 make flash
+```
+Build the application:
+
+```bash
+make application
 ```
 
 The `flash` target programs `build/firmware.elf`, verifies it, resets the target, and exits OpenOCD.
@@ -95,28 +149,16 @@ A successful flash contains messages similar to:
 ** Resetting Target **
 ```
 
-## Run the LED and UART Program
+## Normal Boot
 
-After flashing, the MCU resets and starts the firmware automatically. The program:
+After reset, the bootloader prints `Bootloader Ready` and listens for `U`/`u`
+for up to 5 seconds. If no update is requested and the application vector
+table is valid, the bootloader starts the application. The sample application
+prints `Application started at 0x08002000` and blinks PC13. If no valid
+application exists, the bootloader stays in update mode.
 
-1. Runs `Reset_Handler` from the vector table.
-2. Initializes `.data` and `.bss`.
-3. Calls `main()`.
-4. Enables GPIOC, GPIOA, and USART1.
-5. Configures PC13 as a push-pull output.
-6. Configures PA9 and PA10 for USART1.
-7. Prints `Bootloader Ready`.
-8. Echoes each received character and blinks PC13.
-
-On common Black Pill boards, the PC13 LED is active-low: PC13 low turns the LED on and PC13 high turns it off. If there is no visible blink, the board may use a different LED connection.
-
-The blink speed can be changed in `src/main.c` by changing:
-
-```c
-#define DELAY 500000
-```
-
-A larger value makes the blink slower; a smaller value makes it faster.
+On common Black Pill boards, the PC13 LED is active-low. The example app
+toggles PC13 with a software delay; timing is not precise.
 
 ## Test USART1
 
@@ -126,27 +168,35 @@ After flashing, disconnect the ST-Link and power the board with its USB cable or
 ls /dev/ttyUSB* /dev/ttyACM*
 ```
 
-Open it with:
+Open it with Minicom:
 
 ```bash
-picocom -b 115200 /dev/ttyUSB0
+minicom -D /dev/ttyUSB0 -b 115200
 ```
 
-Press reset once. The terminal should show:
+Before connecting, configure Minicom's serial settings to 115200 baud, 8-N-1,
+with hardware and software flow control disabled. Press reset once. The
+terminal should show the bootloader startup message. To observe the
+application startup message, wait for the 5-second window to expire without
+sending `U`.
 
 ```text
-Bootloader Ready
+Bootloader Ready: send U within 5 seconds to update
+Application started at 0x08002000
 ```
 
-Type any character without pressing Enter. The character should be echoed immediately and the PC13 LED should blink. Exit with `Ctrl+A`, then `Ctrl+X`.
+To initiate an update, send `U` during the boot window and use the Minicom
+XMODEM procedure above. Exit Minicom with `Ctrl-A`, then `X`.
 
-On WSL, the CP2102 may need to be attached through `usbipd`. If `/dev/ttyUSB0` is missing, reconnect or reattach the CP2102 and check the device path again. If permission is denied, add the user to `dialout` and restart WSL:
+On WSL, the CP2102 may need to be attached through `usbipd`. If `/dev/ttyUSB0` is missing, reconnect or reattach the CP2102 and check the device path again. 
+<!-- If permission is denied, add the user to `dialout` and restart WSL:
 
 ```bash
 sudo usermod -aG dialout "$USER"
-```
+``` -->
 
-Do not use `0x271` for the baud register unless the system clock has explicitly been configured to 72 MHz. With the default 8 MHz HSI clock, the USART baud register value is `0x45`.
+<!-- Do not use `0x271` for the baud register unless the system clock has explicitly been configured to 72 MHz.  -->
+With the default 8 MHz HSI clock, the USART baud register value is `0x45`.
 
 ## Debug with GDB
 
@@ -162,7 +212,7 @@ Leave it running. In a second terminal, start GDB:
 make debug
 ```
 
-Useful GDB commands:
+<!-- Useful GDB commands:
 
 ```gdb
 break main
@@ -172,7 +222,7 @@ info registers
 x/1wx 0x4001100c
 continue
 quit
-```
+``` -->
 
 The GDB connection path is:
 

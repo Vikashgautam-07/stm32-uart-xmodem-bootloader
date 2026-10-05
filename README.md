@@ -50,11 +50,14 @@ The firmware uses USART1 with:
 
 The USART implementation is separated into:
 
-- `src/uart.h`: public function declarations
+- `include/uart.h`: UART function declarations
+- `include/xmodem.h`: XMODEM receiver interface
 - `src/uart.c`: USART1 register definitions and implementation
 - `src/main.c`: boot policy, Flash programming, image validation, and app jump
 - `src/xmodem.c`: XMODEM receiver
 - `src/application_main.c`: example application
+- `src/startup_stm32f103.s`: reset handler and vector table
+- `linker/stm32f103.ld`, `linker/application.ld`: bootloader and application memory layouts
 
 ## Transfer an Application
 

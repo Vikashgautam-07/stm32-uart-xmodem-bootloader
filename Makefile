@@ -11,10 +11,9 @@ SIZE        = $(PREFIX)-size
 GDB         = gdb-multiarch
 
 CPU_FLAGS   = -mcpu=cortex-m3 -mthumb
-CFLAGS      = $(CPU_FLAGS) -Wall -O0 -g3 -ffreestanding -nostdlib -fno-builtin
-LDFLAGS     = $(CPU_FLAGS) -T stm32f103.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(BUILD_DIR)/$(TARGET).map
+CFLAGS      = $(CPU_FLAGS) -Wall -O0 -g3 -ffreestanding -nostdlib -fno-builtin -Iinclude
+LDFLAGS     = $(CPU_FLAGS) -T linker/stm32f103.ld -nostdlib -Wl,--gc-sections -Wl,-Map=$(BUILD_DIR)/$(TARGET).map
 
-SRCS        = src/startup_stm32f103.s src/main.c src/uart.c src/xmodem.c
 OBJS        = $(BUILD_DIR)/startup_stm32f103.o \
 			  $(BUILD_DIR)/main.o \
 			  $(BUILD_DIR)/uart.o \
@@ -33,28 +32,30 @@ $(BUILD_DIR):
 $(BUILD_DIR)/startup_stm32f103.o: src/startup_stm32f103.s | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/main.o: src/main.c src/uart.h | $(BUILD_DIR)
+$(BUILD_DIR)/main.o: src/main.c include/uart.h include/xmodem.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/uart.o: src/uart.c src/uart.h | $(BUILD_DIR)
+$(BUILD_DIR)/uart.o: src/uart.c include/uart.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/xmodem.o: src/xmodem.c src/xmodem.h src/uart.h | $(BUILD_DIR)
+$(BUILD_DIR)/xmodem.o: src/xmodem.c include/xmodem.h include/uart.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/application_main.o: src/application_main.c src/uart.h | $(BUILD_DIR)
+$(BUILD_DIR)/application_main.o: src/application_main.c include/uart.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/$(TARGET).elf: $(OBJS)
+$(BUILD_DIR)/$(TARGET).elf: $(OBJS) linker/stm32f103.ld
 	$(CC) $(LDFLAGS) $(OBJS) -o $@
 
 $(BUILD_DIR)/$(TARGET).bin: $(BUILD_DIR)/$(TARGET).elf
 	$(OBJCOPY) -O binary $< $@
 
 $(BUILD_DIR)/$(APP_TARGET).elf: $(BUILD_DIR)/startup_stm32f103.o \
-	$(BUILD_DIR)/application_main.o $(BUILD_DIR)/uart.o
-	$(CC) $(CPU_FLAGS) -T application.ld -nostdlib -Wl,--gc-sections \
-		-Wl,-Map=$(BUILD_DIR)/$(APP_TARGET).map $^ -o $@
+	$(BUILD_DIR)/application_main.o $(BUILD_DIR)/uart.o linker/application.ld
+	$(CC) $(CPU_FLAGS) -T linker/application.ld -nostdlib -Wl,--gc-sections \
+		-Wl,-Map=$(BUILD_DIR)/$(APP_TARGET).map \
+		$(BUILD_DIR)/startup_stm32f103.o \
+		$(BUILD_DIR)/application_main.o $(BUILD_DIR)/uart.o -o $@
 
 $(BUILD_DIR)/$(APP_TARGET).bin: $(BUILD_DIR)/$(APP_TARGET).elf
 	$(OBJCOPY) -O binary $< $@
